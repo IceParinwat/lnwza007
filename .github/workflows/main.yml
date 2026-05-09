@@ -20,21 +20,47 @@ jobs:
         run: |
           set -e
           mkdir -p .github/tmp
-          if [ -n "${{ secrets.SSH_PRIVATE_KEY_B64 }}" ]; then
-            printf '%s' "${{ secrets.SSH_PRIVATE_KEY_B64 }}" | base64 -d | tr -d '\r' > .github/tmp/deploy_key
-          else
-            KEY="${{ secrets.SSH_PRIVATE_KEY }}"
-            # Fallback for legacy secret
-            if printf '%s' "$KEY" | grep -q '\\n'; then
-              printf '%b' "$KEY" | tr -d '\r' > .github/tmp/deploy_key
+          KEY_B64="${{ secrets.SSH_PRIVATE_KEY_B64 }}"
+          KEY_RAW="${{ secrets.SSH_PRIVATE_KEY }}"
+
+          if [ -z "$KEY_B64" ] && [ -z "$KEY_RAW" ]; then
+            echo "Both SSH_PRIVATE_KEY_B64 and SSH_PRIVATE_KEY are empty"
+            exit 1
+          fi
+
+          # Try base64 secret first (preferred)
+          if [ -n "$KEY_B64" ]; then
+            CLEAN_B64="$(printf '%s' "$KEY_B64" | tr -d '\r\n\t ')"
+            if printf '%s' "$CLEAN_B64" | base64 -d > .github/tmp/deploy_key 2>/dev/null; then
+              :
             else
-              printf '%s' "$KEY" | tr -d '\r' > .github/tmp/deploy_key
+              echo "SSH_PRIVATE_KEY_B64 is set but not valid base64"
+              exit 1
+            fi
+          else
+            # Legacy fallback: raw multiline or raw with literal \n
+            if printf '%s' "$KEY_RAW" | grep -q '\\n'; then
+              printf '%b' "$KEY_RAW" > .github/tmp/deploy_key
+            else
+              printf '%s' "$KEY_RAW" > .github/tmp/deploy_key
             fi
           fi
+
+          tr -d '\r' < .github/tmp/deploy_key > .github/tmp/deploy_key.clean
+          mv .github/tmp/deploy_key.clean .github/tmp/deploy_key
           chmod 600 .github/tmp/deploy_key
-          head -n 1 .github/tmp/deploy_key | grep -q "BEGIN OPENSSH PRIVATE KEY"
-          tail -n 1 .github/tmp/deploy_key | grep -q "END OPENSSH PRIVATE KEY"
-          ssh-keygen -l -f .github/tmp/deploy_key >/dev/null
+          if ! head -n 1 .github/tmp/deploy_key | grep -q "BEGIN OPENSSH PRIVATE KEY"; then
+            echo "Key header invalid"
+            exit 1
+          fi
+          if ! tail -n 1 .github/tmp/deploy_key | grep -q "END OPENSSH PRIVATE KEY"; then
+            echo "Key footer invalid"
+            exit 1
+          fi
+          if ! ssh-keygen -l -f .github/tmp/deploy_key >/dev/null 2>&1; then
+            echo ".github/tmp/deploy_key is not a valid private key"
+            exit 1
+          fi
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.0
