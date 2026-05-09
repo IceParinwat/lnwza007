@@ -72,6 +72,9 @@ jobs:
           script: |
             set -e
             cd /var/www/parinwat.csbootstrap.com/lnwza007
+            if [ -n "$(git status --porcelain)" ]; then
+              git stash push -u -m "ci-auto-stash $(date +%Y%m%d%H%M%S)"
+            fi
             git pull --ff-only origin main
             npm ci --omit=dev
             pm2 restart parinwat-lnwza007 --update-env || pm2 start index.js --name parinwat-lnwza007
