@@ -1,0 +1,238 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --green: #00ff41;
+  --dim-green: #008f11;
+  --red: #ff2222;
+  --yellow: #ffe000;
+  --bg: #000;
+  --bg2: #0a0a0a;
+  --nav-h: 60px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--green);
+  font-family: 'Courier New', Courier, monospace;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Tab content */
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 8px calc(var(--nav-h) + 8px);
+}
+.tab-content.hidden { display: none; }
+
+/* Game tab — no scroll, strict flex column, ends above nav */
+#tab-game {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  /* stop at bottom nav, not behind it */
+  height: calc(100dvh - var(--nav-h));
+  max-height: calc(100dvh - var(--nav-h));
+}
+#tab-game.hidden {
+  display: none;
+}
+
+/* Bottom Nav */
+#bottom-nav {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: var(--nav-h);
+  display: flex;
+  background: #0a0f0a;
+  border-top: 1px solid var(--dim-green);
+  z-index: 100;
+}
+.nav-btn {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: none; border: none;
+  color: var(--dim-green);
+  font-family: inherit; font-size: 10px;
+  cursor: pointer; gap: 2px;
+  transition: color 0.15s;
+}
+.nav-btn .nav-icon { font-size: 20px; }
+.nav-btn.active { color: var(--green); text-shadow: 0 0 8px var(--green); }
+
+/* HUD */
+#hud {
+  display: flex; justify-content: space-between;
+  padding: 4px 8px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--dim-green);
+  background: var(--bg2);
+}
+#hud b { color: var(--yellow); }
+
+/* Canvas */
+#canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;                 /* required: let flex shrink below content size */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  background: #000;
+}
+#phaser-container {
+  /* size set by JS (computeContainerSize) so Scale.FIT has fixed bounds */
+  flex-shrink: 0;
+  overflow: hidden;
+}
+#phaser-container canvas {
+  display: block;
+}
+#overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.88);
+  gap: 16px;
+  z-index: 10;
+}
+#overlay.hidden { display: none; }
+#overlay-text {
+  font-size: 16px; font-weight: bold;
+  color: var(--green);
+  text-shadow: 0 0 12px var(--green);
+  text-align: center;
+  padding: 0 20px;
+}
+#overlay-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#btn-start,
+#btn-history {
+  background: none; border: 1px solid var(--green);
+  color: var(--green); font-family: inherit;
+  font-size: 14px; padding: 10px 28px;
+  cursor: pointer; letter-spacing: 2px;
+  min-width: 220px;
+}
+#btn-start:hover,
+#btn-history:hover { background: var(--green); color: #000; }
+#btn-history.hidden-action {
+  display: none;
+}
+
+/* Virtual Joystick — hidden until game starts, never behind nav */
+#joystick-wrap {
+  display: none;                 /* shown via JS in startGame() */
+  justify-content: center;
+  align-items: center;
+  padding: 10px 0;
+  flex-shrink: 0;                /* never squish — always visible */
+}
+#joystick-base {
+  /* responsive: 32vw on small phones, capped at 130px on tablets */
+  width:  min(130px, 32vw);
+  height: min(130px, 32vw);
+  border-radius: 50%;
+  background: rgba(0,255,65,0.05);
+  border: 2px solid var(--dim-green);
+  box-shadow: 0 0 16px rgba(0,255,65,0.1);
+  position: relative;
+  touch-action: none;
+  user-select: none; -webkit-user-select: none;
+  cursor: grab;
+}
+#joystick-base:active { cursor: grabbing; }
+#joystick-base::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40%; height: 40%;
+  border-radius: 50%;
+  border: 1px dashed rgba(0,255,65,0.2);
+}
+#joystick-thumb {
+  width:  min(52px, 13vw);
+  height: min(52px, 13vw);
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #00ff41, #005a1a);
+  box-shadow: 0 0 16px rgba(0,255,65,0.7);
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+#joystick-thumb.snapping {
+  transition: transform 0.12s ease-out;
+}
+
+/* Leaderboard */
+.matrix-rain-container {
+  position: relative; height: 80px; overflow: hidden;
+}
+#matrix-canvas { width: 100%; height: 80px; }
+
+.section-title {
+  font-size: 13px; color: var(--dim-green);
+  padding: 6px 4px; letter-spacing: 1px;
+}
+
+#leaderboard-list { padding: 4px; }
+.lb-row {
+  display: flex; align-items: center;
+  padding: 6px 4px;
+  border-bottom: 1px solid #111;
+  font-size: 13px; gap: 8px;
+}
+.lb-rank { width: 28px; color: var(--dim-green); font-size: 11px; }
+.lb-rank.top1 { color: var(--yellow); font-weight: bold; }
+.lb-rank.top2 { color: #c0c0c0; }
+.lb-rank.top3 { color: #cd7f32; }
+.lb-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid var(--dim-green);
+  object-fit: cover;
+}
+.lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-score { color: var(--yellow); font-weight: bold; min-width: 50px; text-align: right; }
+.lb-level { color: var(--dim-green); font-size: 11px; min-width: 36px; text-align: right; }
+.loading { color: var(--dim-green); text-align: center; padding: 20px; font-size: 12px; }
+
+/* Dev Profile */
+#profile-card {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 16px; gap: 8px;
+  border: 1px solid var(--dim-green); margin: 4px;
+}
+#profile-img {
+  width: 72px; height: 72px; border-radius: 50%;
+  border: 2px solid var(--green);
+}
+#profile-name { font-size: 16px; text-shadow: 0 0 8px var(--green); }
+#profile-json {
+  font-size: 11px; color: var(--dim-green);
+  background: #050a05; padding: 8px;
+  border: 1px solid #1a2a1a; width: 100%;
+  overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+}
+#history-list { padding: 4px; }
+.history-row {
+  display: flex; justify-content: space-between;
+  padding: 5px 4px; border-bottom: 1px solid #111;
+  font-size: 12px;
+}
+.history-row .h-score { color: var(--yellow); }
+.history-row .h-date { color: var(--dim-green); font-size: 10px; }

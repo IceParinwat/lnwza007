@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Memory Runner: Memory Leak Edition</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Tab Content -->
+    <div id="tab-leaderboard" class="tab-content hidden">
+      <div class="matrix-rain-container">
+        <canvas id="matrix-canvas"></canvas>
+      </div>
+      <h2 class="section-title">> TOP_PROCESSES</h2>
+      <div id="leaderboard-list"><div class="loading">LOADING...</div></div>
+    </div>
+
+    <div id="tab-game" class="tab-content">
+      <div id="hud">
+        <span>SCORE: <b id="hud-score">0</b></span>
+      </div>
+      <div id="canvas-wrap">
+        <div id="phaser-container"></div>
+        <div id="overlay">
+          <div id="overlay-text">MEMORY RUNNER</div>
+          <div id="overlay-actions">
+            <button id="btn-start">START GAME</button>
+            <button id="btn-history" class="hidden-action">VIEW GAME HISTORY</button>
+          </div>
+        </div>
+      </div>
+      <div id="joystick-wrap">
+        <div id="joystick-base">
+          <div id="joystick-thumb"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-profile" class="tab-content hidden">
+      <div id="profile-card">
+        <img id="profile-img" src="" alt="avatar">
+        <h2 id="profile-name">LOADING...</h2>
+        <pre id="profile-json"></pre>
+      </div>
+      <h3 class="section-title">> EXECUTION_HISTORY</h3>
+      <div id="history-list"></div>
+    </div>
+
+    <!-- Bottom Nav -->
+    <nav id="bottom-nav">
+      <button class="nav-btn" data-tab="leaderboard">
+        <span class="nav-icon">⚡</span>
+        <span>RANKING</span>
+      </button>
+      <button class="nav-btn active" data-tab="game">
+        <span class="nav-icon">◉</span>
+        <span>GAME</span>
+      </button>
+      <button class="nav-btn" data-tab="profile">
+        <span class="nav-icon">☰</span>
+        <span>DEV</span>
+      </button>
+    </nav>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="/js/game.js"></script>
+  <script src="/js/leaderboard.js"></script>
+  <script src="/js/main.js"></script>
+</body>
+</html>

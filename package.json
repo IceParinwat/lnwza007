@@ -1,20 +1,28 @@
 {
-    "$schema": "https://json.schemastore.org/package.json",
-    "private": true,
-    "type": "module",
-    "scripts": {
-        "build": "vite build",
-        "dev": "vite"
-    },
-    "devDependencies": {
-        "@tailwindcss/vite": "^4.0.0",
-        "axios": "^1.8.2",
-        "concurrently": "^9.0.1",
-        "laravel-vite-plugin": "^1.2.0",
-        "tailwindcss": "^4.0.0",
-        "vite": "^6.2.4"
-    },
-    "dependencies": {
-        "bootstrap": "^5.3.7"
-    }
+  "name": "lnwza007",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/IceParinwat/lnwza007#readme",
+  "bugs": {
+    "url": "https://github.com/IceParinwat/lnwza007/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IceParinwat/lnwza007.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^11.0.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mysql2": "^3.22.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  }
 }
