@@ -119,15 +119,18 @@ async function handleGameOver(score, level, bugsDefeated, playedSeconds = 0) {
   // Fallback: send via LIFF only when backend Messaging API push failed.
   if (!linePushSent && liff.isInClient && liff.isInClient()) {
     try {
-      await liff.sendMessages([buildFlexMessage(score, level, bugsDefeated)]);
+      await liff.sendMessages([buildFlexMessage(score, level, bugsDefeated, playedSeconds)]);
     } catch (e) {
       console.warn('sendMessages failed:', e.message);
     }
   }
 }
 
-function buildFlexMessage(score, level, bugs) {
+function buildFlexMessage(score, level, bugs, playedSeconds = 0) {
   const liffUrl = `https://liff.line.me/${LIFF_ID}`;
+  const mins = Math.floor((playedSeconds || 0) / 60);
+  const secs = (playedSeconds || 0) % 60;
+  const playedText = `${mins}:${String(secs).padStart(2, '0')}`;
   return {
     type: 'flex',
     altText: `💀 SYSTEM CRASH — Score: ${score}`,
@@ -149,6 +152,7 @@ function buildFlexMessage(score, level, bugs) {
           codeLine('process', 'memory_manager.exe'),
           codeLine('status', 'terminated'),
           codeLine('reason', 'ghost_collision'),
+          codeLine('played_time', playedText),
           codeLine('score', String(score)),
           codeLine('level', String(level)),
           codeLine('bugs_defeated', String(bugs)),

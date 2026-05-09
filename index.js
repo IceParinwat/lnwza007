@@ -159,7 +159,19 @@ app.get('/parinwat', (req, res) => {
 
 app.get('/api/leaderboard', async (req, res) => {
   const [rows] = await pool.execute(
-    'SELECT user_id, display_name, picture_url, score, level, bugs_defeated, created_at FROM game_scores ORDER BY score DESC LIMIT 10'
+    `SELECT
+       gs.user_id,
+       COALESCE(lu.display_name, MAX(gs.display_name)) AS display_name,
+       COALESCE(lu.picture_url, MAX(gs.picture_url)) AS picture_url,
+       SUM(gs.score) AS score,
+       MAX(gs.level) AS level,
+       SUM(gs.bugs_defeated) AS bugs_defeated,
+       MAX(gs.created_at) AS created_at
+     FROM game_scores gs
+     LEFT JOIN line_users lu ON lu.user_id = gs.user_id
+     GROUP BY gs.user_id, lu.display_name, lu.picture_url
+     ORDER BY score DESC, created_at ASC
+     LIMIT 10`
   );
   res.json(rows);
 });
@@ -193,10 +205,18 @@ app.post('/api/profile', express.json(), async (req, res) => {
 app.post('/api/score', express.json(), async (req, res) => {
   const { userId, displayName, pictureUrl, score, level, bugsDefeated, playedSeconds } = req.body;
   if (!userId || score == null) return res.status(400).json({ error: 'invalid' });
-  await pool.execute(
-    'INSERT INTO game_scores (user_id, display_name, picture_url, score, level, bugs_defeated) VALUES (?, ?, ?, ?, ?, ?)',
-    [userId, displayName || 'Anonymous', pictureUrl || '', score, level || 1, bugsDefeated || 0]
-  );
+  let dbSaved = true;
+  let dbError = '';
+  try {
+    await pool.execute(
+      'INSERT INTO game_scores (user_id, display_name, picture_url, score, level, bugs_defeated) VALUES (?, ?, ?, ?, ?, ?)',
+      [userId, displayName || 'Anonymous', pictureUrl || '', score, level || 1, bugsDefeated || 0]
+    );
+  } catch (err) {
+    dbSaved = false;
+    dbError = err?.message || 'DB insert failed';
+    console.error('DB insert failed:', dbError);
+  }
 
   const safeScore = Number(score) || 0;
   const safePlayedSeconds = Math.max(0, Number(playedSeconds) || 0);
@@ -220,7 +240,7 @@ app.post('/api/score', express.json(), async (req, res) => {
     console.error('LINE push failed:', lineError);
   }
 
-  res.json({ ok: true, lineMessageSent, lineError });
+  res.json({ ok: true, dbSaved, dbError, lineMessageSent, lineError });
 });
 
 app.post('/callback', line.middleware(config), (req, res) => {

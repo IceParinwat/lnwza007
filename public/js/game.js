@@ -531,5 +531,5 @@ document.getElementById('btn-history').addEventListener('click', () => {
 
 window.onGameTabHidden = () => {
   if (gameState !== 'running') return;
-  endGame('GAME ABORTED', { saveScore: false, showResultOverlay: true });
+  endGame('GAME ABORTED', { saveScore: true, showResultOverlay: true });
 };
