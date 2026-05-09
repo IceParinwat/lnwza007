@@ -16,12 +16,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Prepare SSH key
+        run: |
+          set -e
+          mkdir -p .github/tmp
+          KEY="${{ secrets.SSH_PRIVATE_KEY }}"
+          # Support both real multiline key and one-line key with literal \n
+          if printf '%s' "$KEY" | grep -q '\\n'; then
+            printf '%b' "$KEY" | tr -d '\r' > .github/tmp/deploy_key
+          else
+            printf '%s' "$KEY" | tr -d '\r' > .github/tmp/deploy_key
+          fi
+          chmod 600 .github/tmp/deploy_key
+          head -n 1 .github/tmp/deploy_key | grep -q "BEGIN OPENSSH PRIVATE KEY"
+          tail -n 1 .github/tmp/deploy_key | grep -q "END OPENSSH PRIVATE KEY"
+          ssh-keygen -l -f .github/tmp/deploy_key >/dev/null
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          key_path: /github/workspace/.github/tmp/deploy_key
           script_stop: true
           script: |
             set -e
