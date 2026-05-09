@@ -20,12 +20,16 @@ jobs:
         run: |
           set -e
           mkdir -p .github/tmp
-          KEY="${{ secrets.SSH_PRIVATE_KEY }}"
-          # Support both real multiline key and one-line key with literal \n
-          if printf '%s' "$KEY" | grep -q '\\n'; then
-            printf '%b' "$KEY" | tr -d '\r' > .github/tmp/deploy_key
+          if [ -n "${{ secrets.SSH_PRIVATE_KEY_B64 }}" ]; then
+            printf '%s' "${{ secrets.SSH_PRIVATE_KEY_B64 }}" | base64 -d | tr -d '\r' > .github/tmp/deploy_key
           else
-            printf '%s' "$KEY" | tr -d '\r' > .github/tmp/deploy_key
+            KEY="${{ secrets.SSH_PRIVATE_KEY }}"
+            # Fallback for legacy secret
+            if printf '%s' "$KEY" | grep -q '\\n'; then
+              printf '%b' "$KEY" | tr -d '\r' > .github/tmp/deploy_key
+            else
+              printf '%s' "$KEY" | tr -d '\r' > .github/tmp/deploy_key
+            fi
           fi
           chmod 600 .github/tmp/deploy_key
           head -n 1 .github/tmp/deploy_key | grep -q "BEGIN OPENSSH PRIVATE KEY"
