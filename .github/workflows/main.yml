@@ -2,26 +2,34 @@ name: Deploy to Express Server
 
 on:
   push:
-    branches:
-      - main  # หรือ branch ที่ต้องการ
+    branches: [main]
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Deploy via SSH
-      uses: appleboy/ssh-action@v1.0.0
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          cd /var/www/parinwat.csbootstrap.com/lnwza007
-          git pull origin main
-          npm install
-          pm2 restart all
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            cd /var/www/parinwat.csbootstrap.com/lnwza007
+            git pull --ff-only origin main
+            npm ci --omit=dev
+            pm2 restart parinwat-lnwza007 --update-env || pm2 start index.js --name parinwat-lnwza007
+            pm2 save
+            curl -fsS https://parinwat.csbootstrap.com/api >/dev/null
+            curl -fsS https://parinwat.csbootstrap.com/swagger >/dev/null
 # end
