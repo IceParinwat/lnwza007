@@ -79,6 +79,16 @@ jobs:
             npm ci --omit=dev
             pm2 restart parinwat-lnwza007 --update-env || pm2 start index.js --name parinwat-lnwza007
             pm2 save
-            curl -fsS https://parinwat.csbootstrap.com/api >/dev/null
-            curl -fsS https://parinwat.csbootstrap.com/swagger >/dev/null
+            for i in $(seq 1 20); do
+              if curl -fsS https://parinwat.csbootstrap.com/api >/dev/null && curl -fsS https://parinwat.csbootstrap.com/swagger >/dev/null; then
+                echo "Health check passed on attempt $i"
+                break
+              fi
+              if [ "$i" -eq 20 ]; then
+                echo "Health check failed after retries"
+                pm2 logs parinwat-lnwza007 --lines 80 --nostream || true
+                exit 1
+              fi
+              sleep 3
+            done
 # end
