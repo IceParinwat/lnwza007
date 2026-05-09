@@ -51,19 +51,22 @@ function renderProfile(profile) {
 }
 
 async function fetchHistory(userId) {
+  const el = document.getElementById('history-list');
+  if (!el) return;
   try {
-    const res = await fetch('/api/leaderboard');
-    const data = await res.json();
-    const mine = data.filter(r => r.user_id === userId).slice(0, 5);
-    const el = document.getElementById('history-list');
+    const res = await fetch(`/api/history/${encodeURIComponent(userId)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const mine = await res.json();
     if (!mine.length) { el.innerHTML = '<div class="loading">NO HISTORY</div>'; return; }
-    el.innerHTML = mine.map(r => `
+    el.innerHTML = mine.slice(0, 10).map(r => `
       <div class="history-row">
         <span>${escHtml(r.display_name)}</span>
         <span class="h-score">SCORE: ${r.score}</span>
-        <span class="h-date">${new Date(r.created_at).toLocaleDateString('th')}</span>
+        <span class="h-date">${new Date(r.created_at).toLocaleString('th-TH')}</span>
       </div>`).join('');
-  } catch (e) {}
+  } catch (e) {
+    el.innerHTML = '<div class="loading">LOAD HISTORY FAILED</div>';
+  }
 }
 
 // Tab switching
@@ -89,23 +92,32 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 window.openGameHistoryTab = () => setActiveTab('profile');
 
 // Game over callback — send Flex Message + save score
-async function handleGameOver(score, level, bugsDefeated) {
+async function handleGameOver(score, level, bugsDefeated, playedSeconds = 0) {
+  let linePushSent = false;
+
   // Save to DB
   if (lineProfile) {
-    await fetch('/api/score', {
+    const res = await fetch('/api/score', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userId: lineProfile.userId,
         displayName: lineProfile.displayName,
         pictureUrl: lineProfile.pictureUrl || '',
-        score, level, bugsDefeated,
+        score, level, bugsDefeated, playedSeconds,
       }),
-    }).catch(() => {});
+    }).catch(() => null);
+    if (res) {
+      const result = await res.json().catch(() => ({}));
+      linePushSent = !!result.lineMessageSent;
+      if (result && result.lineMessageSent === false) {
+        console.warn('LINE push not sent:', result.lineError || 'unknown reason');
+      }
+    }
   }
 
-  // Send LINE Flex Message
-  if (liff.isInClient && liff.isInClient()) {
+  // Fallback: send via LIFF only when backend Messaging API push failed.
+  if (!linePushSent && liff.isInClient && liff.isInClient()) {
     try {
       await liff.sendMessages([buildFlexMessage(score, level, bugsDefeated)]);
     } catch (e) {

@@ -44,6 +44,7 @@ let pendingDir = null;
 let phaserGame = null;
 let onGameOver = null;
 let gameState = 'idle'; // idle | running | ended
+let gameStartedAtMs = 0;
 
 let sceneRef;
 let mapGrid = [];
@@ -280,7 +281,10 @@ function endGame(title, { saveScore = true, showResultOverlay = true } = {}) {
       showHistory: true,
     });
   }
-  if (saveScore && onGameOver) onGameOver(player.score, 1, 0);
+  const playedSeconds = gameStartedAtMs
+    ? Math.max(0, Math.floor((Date.now() - gameStartedAtMs) / 1000))
+    : 0;
+  if (saveScore && onGameOver) onGameOver(player.score, 1, 0, playedSeconds);
 }
 
 function movePlayer(deltaMs) {
@@ -494,6 +498,7 @@ function computeContainerSize() {
 
 function startGame() {
   document.getElementById('overlay').classList.add('hidden');
+  gameStartedAtMs = Date.now();
 
   const joyWrap = document.getElementById('joystick-wrap');
   joyWrap.style.display = 'flex';

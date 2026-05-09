@@ -16,9 +16,10 @@ const app = express();
 // MySQL pool
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
+  port: Number(process.env.DB_PORT || 3306),
   user: process.env.DB_USERNAME,
   password: process.env.DB_PASSWORD,
+  database: process.env.DB_DATABASE,
   waitForConnections: true,
   connectionLimit: 10,
 });
@@ -61,7 +62,7 @@ const swaggerSpec = swaggerJsdoc({
       version: '1.0.0',
     },
     servers: [
-      { url: 'http://localhost:3000' },
+      { url: 'http://localhost:3014' },
       { url: 'http://parinwat.csbootstrap.com' },
     ],
     components: {
@@ -86,6 +87,7 @@ const swaggerSpec = swaggerJsdoc({
             score: { type: 'integer' },
             level: { type: 'integer' },
             bugsDefeated: { type: 'integer' },
+            playedSeconds: { type: 'integer' },
           },
         },
       },
@@ -157,7 +159,17 @@ app.get('/parinwat', (req, res) => {
 
 app.get('/api/leaderboard', async (req, res) => {
   const [rows] = await pool.execute(
-    'SELECT display_name, picture_url, score, level, bugs_defeated, created_at FROM game_scores ORDER BY score DESC LIMIT 10'
+    'SELECT user_id, display_name, picture_url, score, level, bugs_defeated, created_at FROM game_scores ORDER BY score DESC LIMIT 10'
+  );
+  res.json(rows);
+});
+
+app.get('/api/history/:userId', async (req, res) => {
+  const { userId } = req.params;
+  if (!userId) return res.status(400).json({ error: 'invalid' });
+  const [rows] = await pool.execute(
+    'SELECT user_id, display_name, picture_url, score, level, bugs_defeated, created_at FROM game_scores WHERE user_id = ? ORDER BY created_at DESC LIMIT 20',
+    [userId]
   );
   res.json(rows);
 });
@@ -179,13 +191,36 @@ app.post('/api/profile', express.json(), async (req, res) => {
 });
 
 app.post('/api/score', express.json(), async (req, res) => {
-  const { userId, displayName, pictureUrl, score, level, bugsDefeated } = req.body;
+  const { userId, displayName, pictureUrl, score, level, bugsDefeated, playedSeconds } = req.body;
   if (!userId || score == null) return res.status(400).json({ error: 'invalid' });
   await pool.execute(
     'INSERT INTO game_scores (user_id, display_name, picture_url, score, level, bugs_defeated) VALUES (?, ?, ?, ?, ?, ?)',
     [userId, displayName || 'Anonymous', pictureUrl || '', score, level || 1, bugsDefeated || 0]
   );
-  res.json({ ok: true });
+
+  const safeScore = Number(score) || 0;
+  const safePlayedSeconds = Math.max(0, Number(playedSeconds) || 0);
+  const mins = Math.floor(safePlayedSeconds / 60);
+  const secs = safePlayedSeconds % 60;
+  const playedText = `${mins}:${String(secs).padStart(2, '0')}`;
+
+  let lineMessageSent = false;
+  let lineError = '';
+  try {
+    await client.pushMessage({
+      to: userId,
+      messages: [{
+        type: 'text',
+        text: `ผลการเล่นเกม\nเวลาเล่น: ${playedText}\nคะแนน: ${safeScore}`,
+      }],
+    });
+    lineMessageSent = true;
+  } catch (err) {
+    lineError = err?.message || 'LINE push failed';
+    console.error('LINE push failed:', lineError);
+  }
+
+  res.json({ ok: true, lineMessageSent, lineError });
 });
 
 app.post('/callback', line.middleware(config), (req, res) => {
