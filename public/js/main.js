@@ -3,6 +3,12 @@
 let LIFF_ID = '';
 let lineProfile = null;
 
+async function pingParinwatRoute() {
+  try {
+    await fetch('/parinwat', { method: 'GET', cache: 'no-store' });
+  } catch (_) {}
+}
+
 async function initLiff() {
   try {
     const cfg = await fetch('/api/config').then(r => r.json());
@@ -188,6 +194,7 @@ function escHtml(s) {
 
 // Bootstrap
 window.addEventListener('DOMContentLoaded', () => {
+  pingParinwatRoute();
   initLiff();
   initLeaderboard();
   // Wire game-over callback
