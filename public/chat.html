@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Memory Runner Chat</title>
+  <link rel="stylesheet" href="/game/css/style.css">
+</head>
+<body class="chat-page">
+  <div id="tab-chat" class="tab-content">
+    <div id="chat-header">
+      LINE STYLE CHAT
+      <a id="enter-game-btn" href="/game">เข้าเกม</a>
+    </div>
+    <div id="chat-messages"></div>
+    <form id="chat-form" autocomplete="off">
+      <input id="chat-input" type="text" maxlength="500" placeholder="พิมพ์ข้อความถาม Gemini..." />
+      <button id="chat-send" type="submit">ส่ง</button>
+    </form>
+  </div>
+
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="/game/js/main.js"></script>
+</body>
+</html>

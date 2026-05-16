@@ -1,17 +1,31 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
 import * as line from '@line/bot-sdk'
 import express from 'express'
 import mysql from 'mysql2/promise'
 import swaggerUi from 'swagger-ui-express'
 import swaggerJsdoc from 'swagger-jsdoc'
+import { createClient } from '@supabase/supabase-js'
+import { GoogleGenAI } from '@google/genai'
 
-const config = { channelSecret: process.env.CHANNEL_SECRET };
+dotenv.config({ override: true })
+
+const channelSecret = process.env.CHANNEL_SECRET || process.env.LINE_CHANNEL_SECRET;
+const channelAccessToken = process.env.CHANNEL_ACCESS_TOKEN || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+
+const config = { channelSecret };
 
 const client = line.LineBotClient.fromChannelAccessToken({
-  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN
+  channelAccessToken
 });
 
 const app = express();
+let dbReady = false;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+const gemini = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
+const geminiReplyModels = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
 
 // MySQL pool
 const pool = mysql.createPool({
@@ -51,6 +65,7 @@ async function initDB() {
     )
   `);
   console.log('DB ready');
+  dbReady = true;
 }
 
 // ── Swagger ──────────────────────────────────────────────────────────────────
@@ -138,8 +153,19 @@ const swaggerUiOptions = {
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.use(express.static('public'));
 app.use('/callback', express.raw({ type: '*/*' }));
+
+app.get('/', (req, res) => {
+  res.sendFile('chat.html', { root: 'public' });
+});
+
+app.get('/game', (req, res) => {
+  res.sendFile('game.html', { root: 'public' });
+});
+app.get('/game/', (req, res) => {
+  res.sendFile('game.html', { root: 'public' });
+});
+app.use('/game', express.static('public', { redirect: false }));
 
 // Swagger routes (common style)
 app.get('/swagger.json', (req, res) => res.json(swaggerSpec));
@@ -158,48 +184,66 @@ app.get('/parinwat', (req, res) => {
 });
 
 app.get('/api/leaderboard', async (req, res) => {
-  const [rows] = await pool.execute(
-    `SELECT
-       gs.user_id,
-       COALESCE(lu.display_name, MAX(gs.display_name)) AS display_name,
-       COALESCE(lu.picture_url, MAX(gs.picture_url)) AS picture_url,
-       SUM(gs.score) AS score,
-       MAX(gs.level) AS level,
-       SUM(gs.bugs_defeated) AS bugs_defeated,
-       MAX(gs.created_at) AS created_at
-     FROM game_scores gs
-     LEFT JOIN line_users lu ON lu.user_id = gs.user_id
-     GROUP BY gs.user_id, lu.display_name, lu.picture_url
-     ORDER BY score DESC, created_at ASC
-     LIMIT 10`
-  );
-  res.json(rows);
+  if (!dbReady) return res.json([]);
+  try {
+    const [rows] = await pool.execute(
+      `SELECT
+         gs.user_id,
+         COALESCE(lu.display_name, MAX(gs.display_name)) AS display_name,
+         COALESCE(lu.picture_url, MAX(gs.picture_url)) AS picture_url,
+         SUM(gs.score) AS score,
+         MAX(gs.level) AS level,
+         SUM(gs.bugs_defeated) AS bugs_defeated,
+         MAX(gs.created_at) AS created_at
+       FROM game_scores gs
+       LEFT JOIN line_users lu ON lu.user_id = gs.user_id
+       GROUP BY gs.user_id, lu.display_name, lu.picture_url
+       ORDER BY score DESC, created_at ASC
+       LIMIT 10`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Leaderboard query failed:', err?.message || err);
+    res.json([]);
+  }
 });
 
 app.get('/api/history/:userId', async (req, res) => {
   const { userId } = req.params;
   if (!userId) return res.status(400).json({ error: 'invalid' });
-  const [rows] = await pool.execute(
-    'SELECT user_id, display_name, picture_url, score, level, bugs_defeated, created_at FROM game_scores WHERE user_id = ? ORDER BY created_at DESC LIMIT 20',
-    [userId]
-  );
-  res.json(rows);
+  if (!dbReady) return res.json([]);
+  try {
+    const [rows] = await pool.execute(
+      'SELECT user_id, display_name, picture_url, score, level, bugs_defeated, created_at FROM game_scores WHERE user_id = ? ORDER BY created_at DESC LIMIT 20',
+      [userId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('History query failed:', err?.message || err);
+    res.json([]);
+  }
 });
 
 app.post('/api/profile', express.json(), async (req, res) => {
   const { userId, displayName, pictureUrl, statusMessage } = req.body;
   if (!userId || !displayName) return res.status(400).json({ error: 'invalid' });
-  await pool.execute(
-    `INSERT INTO line_users (user_id, display_name, picture_url, status_message, last_login_at)
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-     ON DUPLICATE KEY UPDATE
-       display_name = VALUES(display_name),
-       picture_url = VALUES(picture_url),
-       status_message = VALUES(status_message),
-       last_login_at = CURRENT_TIMESTAMP`,
-    [userId, displayName, pictureUrl || '', statusMessage || '']
-  );
-  res.json({ ok: true });
+  if (!dbReady) return res.json({ ok: false, dbSaved: false, error: 'db_not_ready' });
+  try {
+    await pool.execute(
+      `INSERT INTO line_users (user_id, display_name, picture_url, status_message, last_login_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON DUPLICATE KEY UPDATE
+         display_name = VALUES(display_name),
+         picture_url = VALUES(picture_url),
+         status_message = VALUES(status_message),
+         last_login_at = CURRENT_TIMESTAMP`,
+      [userId, displayName, pictureUrl || '', statusMessage || '']
+    );
+    res.json({ ok: true, dbSaved: true });
+  } catch (err) {
+    console.error('Profile upsert failed:', err?.message || err);
+    res.json({ ok: false, dbSaved: false, error: 'db_error' });
+  }
 });
 
 app.post('/api/score', express.json(), async (req, res) => {
@@ -243,6 +287,36 @@ app.post('/api/score', express.json(), async (req, res) => {
   res.json({ ok: true, dbSaved, dbError, lineMessageSent, lineError });
 });
 
+app.post('/api/chat', express.json(), async (req, res) => {
+  const userMessage = String(req.body?.message || '').trim();
+  const userId = String(req.body?.userId || 'web-user');
+  if (!userMessage) return res.status(400).json({ ok: false, error: 'invalid_message' });
+  if (!supabase) return res.status(503).json({ ok: false, error: 'supabase_not_configured' });
+
+  const botReplyText = await generateGeminiTextReply(userMessage);
+  const messageId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const { error } = await supabase
+    .from('messages')
+    .insert([
+      {
+        user_id: userId,
+        message_id: messageId,
+        type: 'text',
+        content: userMessage,
+        reply_token: 'web-chat',
+        reply_content: botReplyText
+      }
+    ]);
+
+  if (error) {
+    console.error('Supabase insert failed for web chat:', error.message);
+    return res.status(500).json({ ok: false, error: 'save_failed' });
+  }
+
+  return res.json({ ok: true, reply: botReplyText });
+});
+
 app.post('/callback', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
     .then((result) => res.json(result))
@@ -252,12 +326,160 @@ app.post('/callback', line.middleware(config), (req, res) => {
     });
 });
 
-function handleEvent(event) {
-  if (event.type !== 'message' || event.message.type !== 'text') return Promise.resolve(null);
-  return client.replyMessage({
-    replyToken: event.replyToken,
-    messages: [{ type: 'text', text: event.message.text }],
-  });
+function toLineSafeText(text, fallback = 'ขออภัยครับ ระบบตอบกลับขัดข้องชั่วคราว') {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return fallback;
+  return trimmed.length > 450 ? `${trimmed.slice(0, 447)}...` : trimmed;
+}
+
+async function generateWithGeminiFallback(contents, config) {
+  let lastError = null;
+  for (const model of geminiReplyModels) {
+    try {
+      return await gemini.models.generateContent({
+        model,
+        contents,
+        config,
+      });
+    } catch (error) {
+      lastError = error;
+      console.warn(`Gemini model failed: ${model} ->`, error?.message || error);
+    }
+  }
+  throw lastError || new Error('No Gemini model available');
+}
+
+async function generateGeminiTextReply(userText) {
+  if (!gemini) return 'ตอนนี้ผู้ช่วยยังไม่พร้อมใช้งาน ลองใหม่อีกครั้งนะครับ';
+  try {
+    const response = await generateWithGeminiFallback(
+      [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `ช่วยตอบผู้ใช้ LINE แบบสั้น กระชับ เป็นภาษาไทย น้ำเสียงเป็นมิตร ไม่เกิน 2 ประโยค\n\nข้อความผู้ใช้: ${userText}`
+            }
+          ]
+        }
+      ],
+      {
+        temperature: 0.6,
+        maxOutputTokens: 120,
+      }
+    );
+    return toLineSafeText(response?.text, 'ขออภัยครับ ตอนนี้ยังตอบคำถามนี้ไม่ได้');
+  } catch (error) {
+    console.error('Gemini text generation failed:', error?.message || error);
+    return 'ขออภัยครับ ระบบ AI ไม่พร้อมชั่วคราว';
+  }
+}
+
+async function streamToBase64(readableStream) {
+  const chunks = [];
+  for await (const chunk of readableStream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('base64');
+}
+
+async function detectAnimalFromLineImage(messageId) {
+  if (!gemini) return 'ยังไม่สามารถวิเคราะห์สัตว์ได้ในตอนนี้';
+  try {
+    const contentStream = await client.getMessageContent(messageId);
+    const imageBase64 = await streamToBase64(contentStream);
+    if (!imageBase64) return 'ไม่พบข้อมูลรูปภาพสำหรับวิเคราะห์';
+
+    const response = await generateWithGeminiFallback(
+      [
+        {
+          role: 'user',
+          parts: [
+            { text: 'รูปนี้เป็นสัตว์ชนิดอะไร ตอบสั้นมาก ไม่เกิน 1 ประโยค ถ้าไม่แน่ใจให้บอกว่าไม่แน่ใจ' },
+            {
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: imageBase64
+              }
+            }
+          ]
+        }
+      ],
+      {
+        temperature: 0.2,
+        maxOutputTokens: 60,
+      }
+    );
+
+    return toLineSafeText(response?.text, 'ไม่แน่ใจว่าเป็นสัตว์ชนิดอะไร');
+  } catch (error) {
+    console.error('Gemini image analysis failed:', error?.message || error);
+    return 'ยังวิเคราะห์ชนิดสัตว์ไม่ได้ในตอนนี้';
+  }
+}
+
+async function handleEvent(event) {
+  if (event.type !== 'message') return null;
+
+  const userId = event?.source?.userId || 'unknown';
+  const replyToken = event?.replyToken || '';
+  const messageId = event?.message?.id || '';
+  const messageType = event?.message?.type || 'unknown';
+  const replyMessages = [];
+
+  let content = null;
+  let botReplyText = '';
+
+  if (messageType === 'text') {
+    content = event.message.text;
+    botReplyText = await generateGeminiTextReply(content);
+    replyMessages.push({ type: 'text', text: botReplyText });
+  } else if (messageType === 'image') {
+    content = `[Received image message: ${messageId}]`;
+    const animalTypeText = await detectAnimalFromLineImage(messageId);
+    replyMessages.push({ type: 'text', text: 'ได้รับรูปภาพสำเร็จครับ' });
+    replyMessages.push({ type: 'text', text: `วิเคราะห์ภาพ: ${animalTypeText}` });
+    botReplyText = `ได้รับรูปภาพสำเร็จครับ | วิเคราะห์ภาพ: ${animalTypeText}`;
+  } else {
+    content = `[Received ${messageType} message]`;
+    botReplyText = `ได้รับข้อความประเภท ${messageType} แล้วครับ`;
+    replyMessages.push({ type: 'text', text: botReplyText });
+  }
+
+  try {
+    if (!supabase) {
+      console.error('Supabase is not configured; skip reply because save must happen first.');
+      return null;
+    }
+
+    const { error } = await supabase
+      .from('messages')
+      .insert([
+        {
+          user_id: userId,
+          message_id: messageId,
+          type: messageType,
+          content,
+          reply_token: replyToken,
+          reply_content: botReplyText
+        }
+      ]);
+
+    if (error) {
+      console.error('Supabase insert failed:', error.message);
+      return null;
+    }
+
+    if (!replyToken) return null;
+
+    return await client.replyMessage({
+      replyToken,
+      messages: replyMessages,
+    });
+  } catch (error) {
+    console.error('handleEvent failed:', error?.message || error);
+    return null;
+  }
 }
 
 const port = process.env.PORT || 3000;
@@ -269,5 +491,6 @@ initDB().then(() => {
   });
 }).catch(err => {
   console.error('DB init failed:', err.message);
+  dbReady = false;
   app.listen(port, () => console.log(`http://localhost:${port} (no DB)`));
 });

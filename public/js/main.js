@@ -2,6 +2,9 @@
 
 let LIFF_ID = '';
 let lineProfile = null;
+let chatInitialized = false;
+let chatBusy = false;
+let liffLoginInProgress = false;
 
 async function pingParinwatRoute() {
   try {
@@ -9,27 +12,40 @@ async function pingParinwatRoute() {
   } catch (_) {}
 }
 
-async function initLiff() {
+async function ensureLineProfile(interactive = false) {
+  if (lineProfile?.userId) return true;
+  if (liffLoginInProgress) return false;
+
   try {
-    const cfg = await fetch('/api/config').then(r => r.json());
-    LIFF_ID = cfg.liffId || '';
+    if (!LIFF_ID) {
+      const cfg = await fetch('/api/config').then(r => r.json());
+      LIFF_ID = cfg.liffId || '';
+    }
     if (!LIFF_ID) throw new Error('LIFF_ID is missing');
+
     await liff.init({ liffId: LIFF_ID });
     if (!liff.isLoggedIn()) {
+      if (!interactive) return false;
+      liffLoginInProgress = true;
       const redirect = new URL(window.location.href);
       redirect.search = '';
       redirect.hash = '';
       liff.login({ redirectUri: redirect.toString() });
-      return;
+      return false;
     }
+
     lineProfile = await liff.getProfile();
     await saveProfile(lineProfile);
     renderProfile(lineProfile);
+    return true;
   } catch (e) {
-    console.warn('LIFF init failed (dev mode):', e.message);
-    lineProfile = { userId: 'dev_user', displayName: 'Dev Mode', pictureUrl: '' };
-    await saveProfile(lineProfile);
-    renderProfile(lineProfile);
+    console.error('LIFF init/login failed:', e?.message || e);
+    if (interactive) {
+      alert('กรุณา Login LINE ก่อนเข้าเกม');
+    }
+    return false;
+  } finally {
+    liffLoginInProgress = false;
   }
 }
 
@@ -53,6 +69,10 @@ function renderProfile(profile) {
     document.getElementById('profile-img').src = profile.pictureUrl;
   }
   document.getElementById('profile-json').textContent = profile.displayName;
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) {
+    chatInput.placeholder = `${profile.displayName} ถามอะไร Gemini ได้เลย...`;
+  }
   fetchHistory(profile.userId);
 }
 
@@ -76,17 +96,29 @@ async function fetchHistory(userId) {
 }
 
 // Tab switching
-function setActiveTab(tab) {
+async function setActiveTab(tab) {
+  if ((tab === 'game' || tab === 'profile')) {
+    const ok = await ensureLineProfile(true);
+    if (!ok) return;
+  }
+
   const currentTab = document.querySelector('.nav-btn.active')?.dataset?.tab || 'game';
   if (currentTab === 'game' && tab !== 'game' && typeof window.onGameTabHidden === 'function') {
     window.onGameTabHidden();
   }
+  const targetTab = document.getElementById('tab-' + tab);
+  if (!targetTab) return;
+
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.querySelector(`.nav-btn[data-tab="${tab}"]`)?.classList.add('active');
   document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-  document.getElementById('tab-' + tab).classList.remove('hidden');
+  targetTab.classList.remove('hidden');
   if (tab === 'leaderboard') fetchLeaderboard();
   if (tab === 'profile' && lineProfile?.userId) fetchHistory(lineProfile.userId);
+  if (tab === 'chat') {
+    const chatInput = document.getElementById('chat-input');
+    if (chatInput) setTimeout(() => chatInput.focus(), 50);
+  }
 }
 
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -96,6 +128,76 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 });
 
 window.openGameHistoryTab = () => setActiveTab('profile');
+
+function appendChatMessage(role, text) {
+  const chatMessages = document.getElementById('chat-messages');
+  if (!chatMessages) return;
+  const row = document.createElement('div');
+  row.className = `chat-row ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble';
+  bubble.textContent = text;
+  row.appendChild(bubble);
+  chatMessages.appendChild(row);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function setChatFormBusy(isBusy) {
+  chatBusy = isBusy;
+  const input = document.getElementById('chat-input');
+  const send = document.getElementById('chat-send');
+  if (input) input.disabled = isBusy;
+  if (send) send.disabled = isBusy;
+}
+
+async function askGeminiFromWebChat(userText) {
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: lineProfile?.userId || 'web-user',
+      message: userText,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || `HTTP ${res.status}`);
+  }
+  return data.reply || 'ขออภัยครับ ยังไม่สามารถตอบได้ในตอนนี้';
+}
+
+async function onChatSubmit(ev) {
+  ev.preventDefault();
+  if (chatBusy) return;
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  const text = (input.value || '').trim();
+  if (!text) return;
+
+  input.value = '';
+  appendChatMessage('user', text);
+  setChatFormBusy(true);
+
+  try {
+    const reply = await askGeminiFromWebChat(text);
+    appendChatMessage('bot', reply);
+  } catch (error) {
+    appendChatMessage('bot', 'ระบบตอบช้าหรือมีปัญหาชั่วคราว ลองส่งอีกครั้งนะครับ');
+    console.error('Web chat failed:', error?.message || error);
+  } finally {
+    setChatFormBusy(false);
+    input.focus();
+  }
+}
+
+function initChatTab() {
+  if (chatInitialized) return;
+  const chatForm = document.getElementById('chat-form');
+  if (!chatForm) return;
+  chatForm.addEventListener('submit', onChatSubmit);
+  appendChatMessage('bot', 'สวัสดีครับ พิมพ์ถามได้เลย ผมจะตอบแบบสั้นและไวเหมือนคุยใน LINE');
+  chatInitialized = true;
+}
 
 // Game over callback — send Flex Message + save score
 async function handleGameOver(score, level, bugsDefeated, playedSeconds = 0) {
@@ -195,8 +297,12 @@ function escHtml(s) {
 // Bootstrap
 window.addEventListener('DOMContentLoaded', () => {
   pingParinwatRoute();
-  initLiff();
-  initLeaderboard();
-  // Wire game-over callback
-  onGameOver = handleGameOver;
+  initChatTab();
+  if (typeof initLeaderboard === 'function') initLeaderboard();
+
+  const isChatOnlyPage = !!document.body.classList.contains('chat-page');
+  setActiveTab(isChatOnlyPage ? 'chat' : 'game');
+
+  // Wire game-over callback (game page)
+  window.onGameOver = handleGameOver;
 });
