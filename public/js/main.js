@@ -5,6 +5,91 @@ let lineProfile = null;
 let chatInitialized = false;
 let chatBusy = false;
 let liffLoginInProgress = false;
+let selectedAttachment = null;
+
+function setEnterGameButtonState(isLoggedIn) {
+  const btn = document.getElementById('enter-game-btn');
+  if (!btn) return;
+  btn.classList.remove('is-logged-in', 'is-logged-out');
+  btn.classList.add(isLoggedIn ? 'is-logged-in' : 'is-logged-out');
+}
+
+async function refreshEnterGameButtonState() {
+  const btn = document.getElementById('enter-game-btn');
+  if (!btn) return;
+  setEnterGameButtonState(false);
+  try {
+    if (!LIFF_ID) {
+      const cfg = await fetch('/api/config').then(r => r.json());
+      LIFF_ID = cfg.liffId || '';
+    }
+    if (!LIFF_ID || !window.liff) return;
+    await liff.init({ liffId: LIFF_ID });
+    setEnterGameButtonState(!!liff.isLoggedIn());
+  } catch (e) {
+    console.warn('refreshEnterGameButtonState failed:', e?.message || e);
+    setEnterGameButtonState(false);
+  }
+}
+
+function parseLiffStateTargetPath() {
+  const params = new URLSearchParams(window.location.search || '');
+  const raw = params.get('liff.state');
+  if (!raw) return '';
+  let decoded = String(raw);
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch (_) {
+      break;
+    }
+  }
+
+  if (/^https?:\/\//i.test(decoded)) {
+    try {
+      const u = new URL(decoded);
+      if (u.origin !== window.location.origin) return '';
+      decoded = `${u.pathname}${u.search || ''}${u.hash || ''}`;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  if (!decoded.startsWith('/')) {
+    decoded = `/${decoded.replace(/^\.?\//, '')}`;
+  }
+  if (decoded.startsWith('//')) return '';
+  if (decoded === '/' || decoded === '/chat') return '';
+  return decoded;
+}
+
+async function resumePathFromLiffStateIfNeeded() {
+  const isChatOnlyPage = !!document.body.classList.contains('chat-page');
+  if (!isChatOnlyPage) return false;
+  const targetPath = parseLiffStateTargetPath();
+  if (!targetPath) return false;
+
+  const currentPathWithQuery = window.location.pathname + (window.location.search || '');
+  if (targetPath === currentPathWithQuery || targetPath === window.location.pathname) return false;
+
+  try {
+    if (!LIFF_ID) {
+      const cfg = await fetch('/api/config').then(r => r.json());
+      LIFF_ID = cfg.liffId || '';
+    }
+    if (LIFF_ID) {
+      // Keep LIFF redirect params untouched until init is resolved.
+      await liff.init({ liffId: LIFF_ID });
+    }
+  } catch (e) {
+    console.warn('LIFF init before liff.state resume failed:', e?.message || e);
+  }
+
+  window.location.replace(targetPath);
+  return true;
+}
 
 async function pingParinwatRoute() {
   try {
@@ -37,15 +122,45 @@ async function ensureLineProfile(interactive = false) {
     lineProfile = await liff.getProfile();
     await saveProfile(lineProfile);
     renderProfile(lineProfile);
+    setEnterGameButtonState(true);
     return true;
   } catch (e) {
     console.error('LIFF init/login failed:', e?.message || e);
+    setEnterGameButtonState(false);
     if (interactive) {
       alert('กรุณา Login LINE ก่อนเข้าเกม');
     }
     return false;
   } finally {
     liffLoginInProgress = false;
+  }
+}
+
+async function goToGameWithLogin(ev) {
+  if (ev) ev.preventDefault();
+  const gamePath = '/game';
+  try {
+    if (!LIFF_ID) {
+      const cfg = await fetch('/api/config').then(r => r.json());
+      LIFF_ID = cfg.liffId || '';
+    }
+    if (!LIFF_ID || !window.liff) {
+      window.location.href = gamePath;
+      return;
+    }
+
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) {
+      const redirect = new URL(window.location.origin);
+      redirect.searchParams.set('liff.state', gamePath);
+      liff.login({ redirectUri: redirect.toString() });
+      return;
+    }
+
+    window.location.href = gamePath;
+  } catch (e) {
+    console.warn('goToGameWithLogin failed:', e?.message || e);
+    window.location.href = gamePath;
   }
 }
 
@@ -146,17 +261,41 @@ function setChatFormBusy(isBusy) {
   chatBusy = isBusy;
   const input = document.getElementById('chat-input');
   const send = document.getElementById('chat-send');
+  const attach = document.getElementById('chat-attach');
   if (input) input.disabled = isBusy;
   if (send) send.disabled = isBusy;
+  if (attach) attach.disabled = isBusy;
 }
 
-async function askGeminiFromWebChat(userText) {
+function renderAttachmentInfo() {
+  const info = document.getElementById('chat-attachment-info');
+  if (!info) return;
+  if (!selectedAttachment) {
+    info.textContent = '';
+    info.classList.add('hidden');
+    return;
+  }
+  info.textContent = `แนบไฟล์: ${selectedAttachment.name} (${Math.ceil(selectedAttachment.size / 1024)} KB)`;
+  info.classList.remove('hidden');
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function askGeminiFromWebChat(userText, attachment = null) {
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       userId: lineProfile?.userId || 'web-user',
       message: userText,
+      attachment,
     }),
   });
   const data = await res.json().catch(() => ({}));
@@ -170,17 +309,32 @@ async function onChatSubmit(ev) {
   ev.preventDefault();
   if (chatBusy) return;
   const input = document.getElementById('chat-input');
+  const fileInput = document.getElementById('chat-file');
   if (!input) return;
   const text = (input.value || '').trim();
-  if (!text) return;
+  if (!text && !selectedAttachment) return;
 
   input.value = '';
-  appendChatMessage('user', text);
+  const userPreviewText = text || (selectedAttachment ? `[แนบไฟล์] ${selectedAttachment.name}` : '');
+  appendChatMessage('user', userPreviewText);
   setChatFormBusy(true);
 
   try {
-    const reply = await askGeminiFromWebChat(text);
+    let attachmentPayload = null;
+    if (selectedAttachment) {
+      const dataUrl = await readFileAsDataUrl(selectedAttachment);
+      const base64 = String(dataUrl).split(',')[1] || '';
+      attachmentPayload = {
+        name: selectedAttachment.name,
+        mimeType: selectedAttachment.type || 'application/octet-stream',
+        data: base64
+      };
+    }
+    const reply = await askGeminiFromWebChat(text, attachmentPayload);
     appendChatMessage('bot', reply);
+    selectedAttachment = null;
+    if (fileInput) fileInput.value = '';
+    renderAttachmentInfo();
   } catch (error) {
     appendChatMessage('bot', 'ระบบตอบช้าหรือมีปัญหาชั่วคราว ลองส่งอีกครั้งนะครับ');
     console.error('Web chat failed:', error?.message || error);
@@ -193,9 +347,29 @@ async function onChatSubmit(ev) {
 function initChatTab() {
   if (chatInitialized) return;
   const chatForm = document.getElementById('chat-form');
+  const attachBtn = document.getElementById('chat-attach');
+  const fileInput = document.getElementById('chat-file');
   if (!chatForm) return;
   chatForm.addEventListener('submit', onChatSubmit);
-  appendChatMessage('bot', 'สวัสดีครับ พิมพ์ถามได้เลย ผมจะตอบแบบสั้นและไวเหมือนคุยใน LINE');
+  if (attachBtn && fileInput) {
+    attachBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      const maxBytes = 5 * 1024 * 1024;
+      if (file.size > maxBytes) {
+        alert('ไฟล์ใหญ่เกิน 5MB กรุณาเลือกไฟล์ที่เล็กลง');
+        fileInput.value = '';
+        selectedAttachment = null;
+        renderAttachmentInfo();
+        return;
+      }
+      selectedAttachment = file;
+      renderAttachmentInfo();
+    });
+  }
+  renderAttachmentInfo();
+  appendChatMessage('bot', 'สวัสดีครับ พิมพ์ถามได้เลย');
   chatInitialized = true;
 }
 
@@ -296,13 +470,23 @@ function escHtml(s) {
 
 // Bootstrap
 window.addEventListener('DOMContentLoaded', () => {
-  pingParinwatRoute();
-  initChatTab();
-  if (typeof initLeaderboard === 'function') initLeaderboard();
+  resumePathFromLiffStateIfNeeded().then((redirected) => {
+    if (redirected) return;
 
-  const isChatOnlyPage = !!document.body.classList.contains('chat-page');
-  setActiveTab(isChatOnlyPage ? 'chat' : 'game');
+    const enterGameBtn = document.getElementById('enter-game-btn');
+    if (enterGameBtn) {
+      enterGameBtn.addEventListener('click', goToGameWithLogin);
+      refreshEnterGameButtonState();
+    }
 
-  // Wire game-over callback (game page)
-  window.onGameOver = handleGameOver;
+    pingParinwatRoute();
+    initChatTab();
+    if (typeof initLeaderboard === 'function') initLeaderboard();
+
+    const isChatOnlyPage = !!document.body.classList.contains('chat-page');
+    setActiveTab(isChatOnlyPage ? 'chat' : 'game');
+
+    // Wire game-over callback (game page)
+    window.onGameOver = handleGameOver;
+  });
 });

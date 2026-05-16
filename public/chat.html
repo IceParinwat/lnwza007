@@ -10,13 +10,16 @@
   <div id="tab-chat" class="tab-content">
     <div id="chat-header">
       LINE STYLE CHAT
-      <a id="enter-game-btn" href="/game">เข้าเกม</a>
+      <a id="enter-game-btn" class="is-logged-out" href="/game">เข้าเกม</a>
     </div>
     <div id="chat-messages"></div>
     <form id="chat-form" autocomplete="off">
+      <input id="chat-file" type="file" hidden />
+      <button id="chat-attach" type="button" title="แนบไฟล์">แนบ</button>
       <input id="chat-input" type="text" maxlength="500" placeholder="พิมพ์ข้อความถาม Gemini..." />
       <button id="chat-send" type="submit">ส่ง</button>
     </form>
+    <div id="chat-attachment-info" class="hidden"></div>
   </div>
 
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>

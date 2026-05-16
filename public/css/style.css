@@ -68,12 +68,24 @@ body.chat-page #tab-chat {
 }
 #enter-game-btn {
   text-decoration: none;
-  color: #00160a;
-  background: #29ea99;
+  color: #fff;
+  background: #a31515;
   border-radius: 999px;
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 700;
+  border: 1px solid rgba(255,255,255,0.2);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+#enter-game-btn.is-logged-out {
+  background: #b91c1c;
+  border-color: #ef4444;
+  color: #fff6f6;
+}
+#enter-game-btn.is-logged-in {
+  background: #138a36;
+  border-color: #22c55e;
+  color: #eaffef;
 }
 #chat-messages {
   flex: 1;
@@ -121,6 +133,15 @@ body.chat-page #tab-chat {
   padding: 9px;
   background: #071108;
 }
+#chat-attach {
+  border: 1px solid #2f7a49;
+  background: #0d2114;
+  color: #afffc5;
+  border-radius: 999px;
+  padding: 0 12px;
+  font-family: inherit;
+  font-size: 12px;
+}
 #chat-input {
   flex: 1;
   min-width: 0;
@@ -151,6 +172,16 @@ body.chat-page #tab-chat {
 }
 #chat-send:disabled {
   opacity: 0.5;
+}
+#chat-attachment-info {
+  padding: 6px 12px 10px;
+  font-size: 12px;
+  color: #8edfa5;
+  border-top: 1px dashed #1a3d24;
+  background: #071108;
+}
+#chat-attachment-info.hidden {
+  display: none;
 }
 
 /* Game tab — no scroll, strict flex column, ends above nav */
@@ -199,6 +230,17 @@ body.chat-page #tab-chat {
   background: var(--bg2);
 }
 #hud b { color: var(--yellow); }
+#back-chat-btn {
+  text-decoration: none;
+  color: #e8ffe8;
+  background: #14532d;
+  border: 1px solid #1f9d4b;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
+}
 
 /* Canvas */
 #canvas-wrap {
