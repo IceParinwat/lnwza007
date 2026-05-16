@@ -23,6 +23,7 @@ let dbReady = false;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+const supabaseStorageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'upload';
 const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 const gemini = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 const geminiReplyModels = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
@@ -383,13 +384,57 @@ async function streamToBase64(readableStream) {
   return Buffer.concat(chunks).toString('base64');
 }
 
-async function detectAnimalFromLineImage(messageId) {
-  if (!gemini) return 'ยังไม่สามารถวิเคราะห์สัตว์ได้ในตอนนี้';
+async function getLineImageBase64(messageId) {
   try {
     const contentStream = await client.getMessageContent(messageId);
-    const imageBase64 = await streamToBase64(contentStream);
-    if (!imageBase64) return 'ไม่พบข้อมูลรูปภาพสำหรับวิเคราะห์';
+    return await streamToBase64(contentStream);
+  } catch (error) {
+    console.error('Read LINE image failed:', error?.message || error);
+    return '';
+  }
+}
 
+async function uploadLineImageToSupabaseStorage(imageBase64, messageId, mimeType = 'image/jpeg') {
+  if (!supabase || !imageBase64) return '';
+  try {
+    const ext = mimeType.includes('png') ? 'png' : 'jpg';
+    const date = new Date();
+    const path = `line/${date.getUTCFullYear()}/${String(date.getUTCMonth() + 1).padStart(2, '0')}/${messageId}.${ext}`;
+    const bytes = Buffer.from(imageBase64, 'base64');
+
+    const { error: uploadError } = await supabase.storage
+      .from(supabaseStorageBucket)
+      .upload(path, bytes, {
+        contentType: mimeType,
+        upsert: true
+      });
+
+    if (uploadError) {
+      console.error('Supabase storage upload failed:', uploadError.message);
+      return '';
+    }
+
+    const { data: publicData } = supabase.storage.from(supabaseStorageBucket).getPublicUrl(path);
+    if (publicData?.publicUrl) return publicData.publicUrl;
+
+    const { data: signedData, error: signedError } = await supabase.storage
+      .from(supabaseStorageBucket)
+      .createSignedUrl(path, 60 * 60 * 24 * 7);
+    if (signedError) {
+      console.error('Supabase signed URL failed:', signedError.message);
+      return path;
+    }
+    return signedData?.signedUrl || path;
+  } catch (error) {
+    console.error('uploadLineImageToSupabaseStorage failed:', error?.message || error);
+    return '';
+  }
+}
+
+async function detectAnimalFromImageBase64(imageBase64, mimeType = 'image/jpeg') {
+  if (!gemini) return 'ยังไม่สามารถวิเคราะห์สัตว์ได้ในตอนนี้';
+  if (!imageBase64) return 'ไม่พบข้อมูลรูปภาพสำหรับวิเคราะห์';
+  try {
     const response = await generateWithGeminiFallback(
       [
         {
@@ -398,7 +443,7 @@ async function detectAnimalFromLineImage(messageId) {
             { text: 'รูปนี้เป็นสัตว์ชนิดอะไร ตอบสั้นมาก ไม่เกิน 1 ประโยค ถ้าไม่แน่ใจให้บอกว่าไม่แน่ใจ' },
             {
               inlineData: {
-                mimeType: 'image/jpeg',
+                mimeType,
                 data: imageBase64
               }
             }
@@ -435,8 +480,10 @@ async function handleEvent(event) {
     botReplyText = await generateGeminiTextReply(content);
     replyMessages.push({ type: 'text', text: botReplyText });
   } else if (messageType === 'image') {
-    content = `[Received image message: ${messageId}]`;
-    const animalTypeText = await detectAnimalFromLineImage(messageId);
+    const imageBase64 = await getLineImageBase64(messageId);
+    const imageUrl = await uploadLineImageToSupabaseStorage(imageBase64, messageId, 'image/jpeg');
+    content = imageUrl || `[Received image message: ${messageId}]`;
+    const animalTypeText = await detectAnimalFromImageBase64(imageBase64, 'image/jpeg');
     replyMessages.push({ type: 'text', text: 'ได้รับรูปภาพสำเร็จครับ' });
     replyMessages.push({ type: 'text', text: `วิเคราะห์ภาพ: ${animalTypeText}` });
     botReplyText = `ได้รับรูปภาพสำเร็จครับ | วิเคราะห์ภาพ: ${animalTypeText}`;
